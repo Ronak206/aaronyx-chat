@@ -87,6 +87,8 @@ export default function AaronyxApp() {
   const [isUploading, setIsUploading] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(false)
   const [jitsiRoom, setJitsiRoom] = useState<string | null>(null)
+  const [incomingCall, setIncomingCall] = useState<{callerId: string, callerName: string, callerAvatar?: string, roomName: string, type: 'voice' | 'video'} | null>(null)
+  const [showIncomingCallDialog, setShowIncomingCallDialog] = useState(false)
   
   // Auth forms
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
@@ -159,24 +161,104 @@ export default function AaronyxApp() {
     })
   }, [])
 
-  // Start Jitsi call
+  // Start Jitsi call - sends invitation to other user
   const startJitsiCall = async (type: 'voice' | 'video', targetUser: User) => {
     try {
-      await loadJitsiScript()
-      
       const roomName = `aaronyx-${currentChat?.id || Date.now()}-${user?.id}-${targetUser.id}`
+      
+      // Create call invitation in database
+      const res = await fetch('/api/calls/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiverId: targetUser.id,
+          type,
+          roomName
+        })
+      })
+      
+      if (!res.ok) {
+        throw new Error('Failed to create call')
+      }
+      
       setJitsiRoom(roomName)
       setCallPartner(targetUser)
       setCallType(type)
       setInCall(true)
-      setCallStatus('connected')
+      setCallStatus('calling')
       
-      toast.success(`Starting ${type} call with ${targetUser.username}`)
+      toast.success(`Calling ${targetUser.username}...`)
+      
+      // Show notification to other user
+      showNotification(`Calling ${targetUser.username}`, `${type === 'video' ? 'Video' : 'Voice'} call`, user?.avatar)
     } catch (error) {
       console.error('Failed to start Jitsi call:', error)
-      toast.error('Failed to start video call')
+      toast.error('Failed to start call')
     }
   }
+
+  // Accept incoming call
+  const acceptIncomingCall = async () => {
+    if (!incomingCall) return
+    
+    setJitsiRoom(incomingCall.roomName)
+    setCallPartner({ id: incomingCall.callerId, username: incomingCall.callerName, avatar: incomingCall.callerAvatar })
+    setCallType(incomingCall.type)
+    setInCall(true)
+    setCallStatus('connected')
+    setShowIncomingCallDialog(false)
+    setIncomingCall(null)
+    
+    // Mark call as accepted
+    await fetch('/api/calls/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomName: incomingCall.roomName, status: 'accepted' })
+    })
+    
+    toast.success('Call connected!')
+  }
+
+  // Decline incoming call
+  const declineIncomingCall = async () => {
+    if (!incomingCall) return
+    
+    // Mark call as declined
+    await fetch('/api/calls/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomName: incomingCall.roomName, status: 'declined' })
+    })
+    
+    setShowIncomingCallDialog(false)
+    setIncomingCall(null)
+    toast.info('Call declined')
+  }
+
+  // Poll for incoming calls
+  useEffect(() => {
+    if (!user) return
+    
+    const pollCalls = async () => {
+      try {
+        const res = await fetch('/api/calls/incoming')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.call && !showIncomingCallDialog) {
+            setIncomingCall(data.call)
+            setShowIncomingCallDialog(true)
+            // Play notification sound and show browser notification
+            showNotification(`Incoming ${data.call.type} call`, `${data.call.callerName} is calling you`, data.call.callerAvatar)
+          }
+        }
+      } catch (error) {
+        console.error('Error polling calls:', error)
+      }
+    }
+    
+    const interval = setInterval(pollCalls, 2000)
+    return () => clearInterval(interval)
+  }, [user, showIncomingCallDialog, showNotification])
 
   // End Jitsi call
   const endJitsiCall = () => {
@@ -1378,10 +1460,11 @@ export default function AaronyxApp() {
                   
                   {/* Emoji Picker Popover */}
                   <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
-                    <PopoverContent className="w-80 p-0" align="bottom-start">
+                    <PopoverContent className="w-80 p-0" align="start" side="top">
                       <EmojiPicker 
                         onEmojiClick={(emojiData) => {
                           setMessageInput(prev => prev + emojiData.emoji)
+                          setShowEmojiPicker(false)
                         }}
                         width="100%"
                         height={350}
@@ -1430,13 +1513,14 @@ export default function AaronyxApp() {
                     />
                     
                     {/* Emoji Button */}
-                    <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
-                      <PopoverTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <Smile className="h-5 w-5" />
-                        </Button>
-                      </PopoverTrigger>
-                    </Popover>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      type="button"
+                      onClick={() => setShowEmojiPicker(true)}
+                    >
+                      <Smile className="h-5 w-5" />
+                    </Button>
                     
                     {/* Send Button */}
                     <Button size="icon" onClick={handleSendMessage} disabled={!messageInput.trim() && !isUploading}>
@@ -1770,16 +1854,11 @@ export default function AaronyxApp() {
                   <div className="flex-1 bg-black flex items-center justify-center">
                     {currentRoom.videoUrl ? (
                       <div className="w-full h-full relative">
-                        <ReactPlayer
-                          url={currentRoom.videoUrl}
-                          width="100%"
-                          height="100%"
-                          playing={isPlaying}
-                          onPlay={() => handleRoomSync('play', currentProgress)}
-                          onPause={() => handleRoomSync('pause', currentProgress)}
-                          onProgress={({ playedSeconds }) => {
-                            // Only sync for host
-                          }}
+                        <iframe
+                          src={currentRoom.videoUrl}
+                          className="w-full h-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
                         />
                       </div>
                     ) : (
@@ -1957,19 +2036,19 @@ export default function AaronyxApp() {
       </Dialog>
 
       {/* Incoming Call Dialog */}
-      <Dialog open={callStatus === 'ringing' && !isCaller} onOpenChange={(open) => !open && declineCall()}>
+      <Dialog open={showIncomingCallDialog} onOpenChange={(open) => !open && declineIncomingCall()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Incoming {callType} call</DialogTitle>
+            <DialogTitle>Incoming {incomingCall?.type === 'video' ? 'Video' : 'Voice'} Call</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col items-center py-6">
             <Avatar className="h-20 w-20 mb-4">
-              <AvatarImage src={callPartner?.avatar || ''} />
+              <AvatarImage src={incomingCall?.callerAvatar || ''} />
               <AvatarFallback className="text-2xl">
-                {callPartner?.username?.slice(0, 2).toUpperCase()}
+                {incomingCall?.callerName?.slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
-            <p className="text-lg font-medium">{callPartner?.username}</p>
+            <p className="text-lg font-medium">{incomingCall?.callerName}</p>
             <p className="text-muted-foreground">is calling you...</p>
           </div>
           <div className="flex items-center justify-center gap-4">
@@ -1977,11 +2056,7 @@ export default function AaronyxApp() {
               variant="destructive"
               size="lg"
               className="rounded-full h-14 w-14"
-              onClick={() => {
-                if (callPartner) {
-                  declineCall()
-                }
-              }}
+              onClick={declineIncomingCall}
             >
               <PhoneOff className="h-6 w-6" />
             </Button>
@@ -1989,43 +2064,7 @@ export default function AaronyxApp() {
               variant="default"
               size="lg"
               className="rounded-full h-14 w-14 bg-green-500 hover:bg-green-600"
-              onClick={async () => {
-                try {
-                  const stream = await navigator.mediaDevices.getUserMedia({
-                    video: callType === 'video',
-                    audio: true,
-                  })
-                  setLocalStream(stream)
-                  
-                  const pc = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-                  })
-                  setPeerConnection(pc)
-                  
-                  stream.getTracks().forEach(track => pc.addTrack(track, stream))
-                  
-                  pc.onicecandidate = (event) => {
-                    if (event.candidate && callPartner) {
-                      socket?.emit('call:ice-candidate', {
-                        userId: user!.id,
-                        candidate: event.candidate.toJSON(),
-                        targetUserId: callPartner.id,
-                      })
-                    }
-                  }
-                  
-                  pc.ontrack = (event) => {
-                    setRemoteStream(event.streams[0])
-                  }
-                  
-                  setCallStatus('connected')
-                  setInCall(true)
-                  
-                  // Would need to get offer from incoming call data and create answer
-                } catch {
-                  toast.error('Failed to access camera/microphone')
-                }
-              }}
+              onClick={acceptIncomingCall}
             >
               <Phone className="h-6 w-6" />
             </Button>
