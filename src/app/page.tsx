@@ -20,6 +20,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import EmojiPicker from 'emoji-picker-react'
+import LiveKitVideoCall from '@/components/livekit/LiveKitVideoCall'
 import { 
   MessageCircle, Video, Film, User as UserIcon, Settings, LogOut, Search, 
   Send, Phone, PhoneOff, Mic, MicOff, VideoOff, Share2, Users, Plus, 
@@ -90,6 +91,9 @@ export default function AaronyxApp() {
   const [incomingCall, setIncomingCall] = useState<{callId: string, callerId: string, callerName: string, callerAvatar?: string, roomName: string, type: 'voice' | 'video'} | null>(null)
   const [showIncomingCallDialog, setShowIncomingCallDialog] = useState(false)
   const [currentCallId, setCurrentCallId] = useState<string | null>(null) // Track outgoing call ID
+  const [livekitToken, setLivekitToken] = useState<string | null>(null)
+  const [livekitUrl, setLivekitUrl] = useState<string | null>(null)
+  const [useLiveKit, setUseLiveKit] = useState(true) // Toggle between LiveKit and Jitsi
   
   // Auth forms
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
@@ -185,18 +189,47 @@ export default function AaronyxApp() {
       
       // Store call ID for status polling
       setCurrentCallId(callId)
-      setJitsiRoom(roomName)
       setCallPartner(targetUser)
       setCallType(type)
       setInCall(true)
       setCallStatus('calling')
+      
+      // Try to get LiveKit token
+      try {
+        const tokenRes = await fetch('/api/livekit/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomName }),
+        })
+        
+        if (tokenRes.ok) {
+          const tokenData = await tokenRes.json()
+          if (tokenData.token && !tokenData.development) {
+            setLivekitToken(tokenData.token)
+            setLivekitUrl(tokenData.url)
+            setUseLiveKit(true)
+          } else {
+            // Fall back to Jitsi if LiveKit not configured
+            setJitsiRoom(roomName)
+            setUseLiveKit(false)
+          }
+        } else {
+          // Fall back to Jitsi
+          setJitsiRoom(roomName)
+          setUseLiveKit(false)
+        }
+      } catch (error) {
+        console.log('LiveKit not available, using Jitsi')
+        setJitsiRoom(roomName)
+        setUseLiveKit(false)
+      }
       
       toast.success(`Calling ${targetUser.username}...`)
       
       // Show notification to other user
       showNotification(`Calling ${targetUser.username}`, `${type === 'video' ? 'Video' : 'Voice'} call`, user?.avatar)
     } catch (error) {
-      console.error('Failed to start Jitsi call:', error)
+      console.error('Failed to start call:', error)
       toast.error('Failed to start call')
     }
   }
@@ -212,11 +245,34 @@ export default function AaronyxApp() {
       body: JSON.stringify({ callId: incomingCall.callId, status: 'accepted' })
     })
     
-    if (res.ok) {
-      const data = await res.json()
-      setJitsiRoom(data.roomName || incomingCall.roomName)
-    } else {
-      setJitsiRoom(incomingCall.roomName)
+    const roomName = res.ok ? (await res.json()).roomName : incomingCall.roomName
+    
+    // Try to get LiveKit token
+    try {
+      const tokenRes = await fetch('/api/livekit/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomName }),
+      })
+      
+      if (tokenRes.ok) {
+        const tokenData = await tokenRes.json()
+        if (tokenData.token && !tokenData.development) {
+          setLivekitToken(tokenData.token)
+          setLivekitUrl(tokenData.url)
+          setUseLiveKit(true)
+        } else {
+          setJitsiRoom(roomName)
+          setUseLiveKit(false)
+        }
+      } else {
+        setJitsiRoom(roomName)
+        setUseLiveKit(false)
+      }
+    } catch (error) {
+      console.log('LiveKit not available, using Jitsi')
+      setJitsiRoom(roomName)
+      setUseLiveKit(false)
     }
     
     setCallPartner({ id: incomingCall.callerId, username: incomingCall.callerName, avatar: incomingCall.callerAvatar })
@@ -309,6 +365,9 @@ export default function AaronyxApp() {
     setInCall(false)
     setCallPartner(null)
     setCurrentCallId(null)
+    setLivekitToken(null)
+    setLivekitUrl(null)
+    setUseLiveKit(true)
     resetCall()
     toast.info('Call ended')
   }
@@ -1592,8 +1651,19 @@ export default function AaronyxApp() {
               <h2 className="font-semibold text-lg">Calls</h2>
             </div>
             
-            {jitsiRoom ? (
-              // Jitsi Call UI
+            {useLiveKit && livekitToken && livekitUrl ? (
+              // LiveKit Call UI
+              <div className="flex-1">
+                <LiveKitVideoCall
+                  token={livekitToken}
+                  serverUrl={livekitUrl}
+                  onDisconnect={endJitsiCall}
+                  callType={callType || 'video'}
+                  callerName={callPartner?.username}
+                />
+              </div>
+            ) : jitsiRoom ? (
+              // Jitsi Call UI (fallback)
               <div className="flex-1 relative bg-black">
                 <iframe
                   src={`https://meet.jit.si/${jitsiRoom}#config.startWithVideoMuted=${callType === 'voice'}&config.startWithAudioMuted=false&config.prejoinPageEnabled=false&config.disableDeepLinking=true`}
