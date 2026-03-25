@@ -25,7 +25,7 @@ import {
   Send, Phone, PhoneOff, Mic, MicOff, VideoOff, Share2, Users, Plus, 
   Moon, Sun, Check, CheckCheck, Play, Pause, SkipForward, Clock,
   Monitor, MonitorOff, X, Smile, Paperclip, MoreVertical, UserPlus,
-  Hash, Volume2, VolumeX, Image as ImageIcon, FileText, Bell, BellOff
+  Hash, Volume2, VolumeX
 } from 'lucide-react'
 import { toast } from 'sonner'
 
