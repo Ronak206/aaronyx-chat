@@ -48,8 +48,8 @@ export async function GET(
           },
         },
         receivers: {
-          where: { receiverId: currentUser.id },
           select: {
+            receiverId: true,
             status: true,
             readAt: true,
           },
@@ -58,7 +58,39 @@ export async function GET(
       orderBy: { createdAt: 'asc' },
     });
     
-    return NextResponse.json({ messages });
+    // Transform messages to include computed status
+    const transformedMessages = messages.map(msg => {
+      // For messages sent by current user, check if all receivers have read
+      let status = 'sent';
+      if (msg.senderId === currentUser.id) {
+        const allDelivered = msg.receivers.every(r => r.status === 'delivered' || r.status === 'read');
+        const allRead = msg.receivers.every(r => r.status === 'read');
+        
+        if (allRead && msg.receivers.length > 0) {
+          status = 'read';
+        } else if (allDelivered) {
+          status = 'delivered';
+        }
+      } else {
+        // For received messages, get this user's status
+        const receiverStatus = msg.receivers.find(r => r.receiverId === currentUser.id);
+        status = receiverStatus?.status || 'delivered';
+      }
+      
+      return {
+        id: msg.id,
+        chatId: msg.chatId,
+        senderId: msg.senderId,
+        content: msg.content,
+        type: msg.type,
+        mediaUrl: msg.mediaUrl,
+        status,
+        createdAt: msg.createdAt,
+        sender: msg.sender,
+      };
+    });
+    
+    return NextResponse.json({ messages: transformedMessages });
   } catch (error) {
     console.error('Get messages error:', error);
     return NextResponse.json(
@@ -127,6 +159,7 @@ export async function POST(
         content: content || '',
         type,
         mediaUrl,
+        status: 'sent',
         receivers: {
           create: chatMember.chat.members
             .filter((m) => m.userId !== currentUser.id)
@@ -145,6 +178,12 @@ export async function POST(
             avatar: true,
           },
         },
+        receivers: {
+          select: {
+            receiverId: true,
+            status: true,
+          },
+        },
       },
     });
     
@@ -154,9 +193,61 @@ export async function POST(
       data: { updatedAt: new Date() },
     });
     
-    return NextResponse.json({ message });
+    return NextResponse.json({ 
+      message: {
+        id: message.id,
+        chatId: message.chatId,
+        senderId: message.senderId,
+        content: message.content,
+        type: message.type,
+        mediaUrl: message.mediaUrl,
+        status: 'sent',
+        createdAt: message.createdAt,
+        sender: message.sender,
+      }
+    });
   } catch (error) {
     console.error('Send message error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+// Mark messages as read
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const currentUser = await getCurrentUser();
+    
+    if (!currentUser) {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+    
+    const { id } = await params;
+    
+    // Mark all unread messages in this chat as read for current user
+    await db.messageReceiver.updateMany({
+      where: {
+        message: { chatId: id },
+        receiverId: currentUser.id,
+        status: { not: 'read' },
+      },
+      data: {
+        status: 'read',
+        readAt: new Date(),
+      },
+    });
+    
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Mark read error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

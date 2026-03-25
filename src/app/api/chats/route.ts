@@ -44,6 +44,13 @@ export async function GET() {
                     displayName: true,
                   },
                 },
+                receivers: {
+                  select: {
+                    receiverId: true,
+                    status: true,
+                    readAt: true,
+                  },
+                },
               },
             },
           },
@@ -61,12 +68,44 @@ export async function GET() {
         (m) => m.user.id !== currentUser.id
       );
       
+      // Calculate message status for lastMessage
+      let lastMessage = cm.chat.messages[0] || null;
+      if (lastMessage) {
+        // For messages sent by current user, check if all receivers have read
+        let status = 'sent';
+        if (lastMessage.senderId === currentUser.id) {
+          const allDelivered = lastMessage.receivers.every(r => r.status === 'delivered' || r.status === 'read');
+          const allRead = lastMessage.receivers.every(r => r.status === 'read');
+          
+          if (allRead && lastMessage.receivers.length > 0) {
+            status = 'read';
+          } else if (allDelivered) {
+            status = 'delivered';
+          }
+        } else {
+          // For received messages
+          const receiverStatus = lastMessage.receivers.find(r => r.receiverId === currentUser.id);
+          status = receiverStatus?.status || 'delivered';
+        }
+        
+        lastMessage = {
+          id: lastMessage.id,
+          chatId: lastMessage.chatId,
+          senderId: lastMessage.senderId,
+          content: lastMessage.content,
+          type: lastMessage.type,
+          status,
+          createdAt: lastMessage.createdAt,
+          sender: lastMessage.sender,
+        };
+      }
+      
       return {
         id: cm.chat.id,
         type: cm.chat.type,
         name: cm.chat.name || otherMembers[0]?.user.displayName || otherMembers[0]?.user.username || 'Unknown',
         avatar: otherMembers[0]?.user.avatar,
-        lastMessage: cm.chat.messages[0] || null,
+        lastMessage,
         members: otherMembers.map((m) => m.user),
         updatedAt: cm.chat.updatedAt,
       };
@@ -131,7 +170,21 @@ export async function POST(request: NextRequest) {
     });
     
     if (existingChat) {
-      return NextResponse.json({ chat: existingChat });
+      // Format the response
+      const otherMembers = existingChat.members.filter(
+        (m) => m.user.id !== currentUser.id
+      );
+      
+      return NextResponse.json({
+        chat: {
+          id: existingChat.id,
+          type: existingChat.type,
+          name: otherMembers[0]?.user.displayName || otherMembers[0]?.user.username || 'Unknown',
+          avatar: otherMembers[0]?.user.avatar,
+          members: otherMembers.map((m) => m.user),
+          updatedAt: existingChat.updatedAt,
+        },
+      });
     }
     
     // Create new chat
@@ -162,7 +215,21 @@ export async function POST(request: NextRequest) {
       },
     });
     
-    return NextResponse.json({ chat });
+    // Format the response
+    const otherMembers = chat.members.filter(
+      (m) => m.user.id !== currentUser.id
+    );
+    
+    return NextResponse.json({
+      chat: {
+        id: chat.id,
+        type: chat.type,
+        name: otherMembers[0]?.user.displayName || otherMembers[0]?.user.username || 'Unknown',
+        avatar: otherMembers[0]?.user.avatar,
+        members: otherMembers.map((m) => m.user),
+        updatedAt: chat.updatedAt,
+      },
+    });
   } catch (error) {
     console.error('Create chat error:', error);
     return NextResponse.json(

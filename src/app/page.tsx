@@ -236,6 +236,17 @@ export default function AaronyxApp() {
     }
   }, [user])
 
+  // Poll for chat list updates
+  useEffect(() => {
+    if (!user) return
+    
+    const pollInterval = setInterval(() => {
+      loadChats()
+    }, 5000) // Poll every 5 seconds
+    
+    return () => clearInterval(pollInterval)
+  }, [user])
+
   // Auto-scroll chat
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -306,11 +317,53 @@ export default function AaronyxApp() {
       if (res.ok) {
         const data = await res.json()
         setMessages(data.messages)
+        // Mark messages as read
+        markMessagesAsRead(chatId)
       }
     } catch (error) {
       console.error('Failed to load messages:', error)
     }
   }
+
+  const markMessagesAsRead = async (chatId: string) => {
+    try {
+      await fetch(`/api/chats/${chatId}/messages`, {
+        method: 'PUT',
+      })
+    } catch (error) {
+      console.error('Failed to mark messages as read:', error)
+    }
+  }
+
+  // Poll for new messages (fallback for when socket is not connected)
+  useEffect(() => {
+    if (!user || !currentChat) return
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/chats/${currentChat.id}/messages`)
+        if (res.ok) {
+          const data = await res.json()
+          // Only update if there are new messages
+          if (data.messages.length > messages.length) {
+            setMessages(data.messages)
+            markMessagesAsRead(currentChat.id)
+          } else if (data.messages.length === messages.length) {
+            // Check if status changed
+            const lastMsg = data.messages[data.messages.length - 1]
+            const currentLastMsg = messages[messages.length - 1]
+            if (lastMsg && currentLastMsg && lastMsg.status !== currentLastMsg.status) {
+              setMessages(data.messages)
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Poll error:', error)
+      }
+    }, 3000) // Poll every 3 seconds
+    
+    return () => clearInterval(pollInterval)
+  }, [user, currentChat, messages.length])
 
   // Load all users when new chat dialog opens
   const loadAllUsers = async () => {
@@ -986,7 +1039,7 @@ export default function AaronyxApp() {
                             {chat.lastMessage?.senderId === user?.id && (
                               <span>
                                 {chat.lastMessage.status === 'read' ? (
-                                  <CheckCheck className="h-3 w-3 text-primary" />
+                                  <CheckCheck className="h-3 w-3 text-blue-400" />
                                 ) : chat.lastMessage.status === 'delivered' ? (
                                   <CheckCheck className="h-3 w-3 text-muted-foreground" />
                                 ) : (
@@ -1093,7 +1146,7 @@ export default function AaronyxApp() {
                               {isOwn && (
                                 <span>
                                   {msg.status === 'read' ? (
-                                    <CheckCheck className="h-3 w-3" />
+                                    <CheckCheck className="h-3 w-3 text-blue-400" />
                                   ) : msg.status === 'delivered' ? (
                                     <CheckCheck className="h-3 w-3 opacity-70" />
                                   ) : (
