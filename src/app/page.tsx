@@ -854,8 +854,8 @@ export default function AaronyxApp() {
             <div className="flex-1 min-w-0 hidden md:block">
               <p className="text-sm font-medium truncate">{user?.displayName || user?.username}</p>
               <p className="text-xs text-muted-foreground flex items-center gap-1">
-                <span className={`h-2 w-2 rounded-full ${isSocketConnected ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-                {isSocketConnected ? 'Online' : 'Offline'}
+                <span className={`h-2 w-2 rounded-full ${user?.isOnline ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+                {user?.isOnline ? 'Online' : 'Offline'}
               </p>
             </div>
             <DropdownMenu>
