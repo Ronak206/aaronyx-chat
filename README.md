@@ -385,7 +385,52 @@ socket.emit('room:chat', { roomId, userId, username, content })
 
 ## 🚢 Deployment
 
-### Docker (Recommended)
+### Vercel (Recommended)
+
+1. **Push your code to GitHub**
+
+2. **Import to Vercel**
+   - Go to [vercel.com](https://vercel.com)
+   - Import your GitHub repository
+   - Select the `aaronyx-chat` repo
+
+3. **Add Environment Variables in Vercel**
+   
+   Go to **Settings → Environment Variables** and add:
+   
+   | Name | Value |
+   |------|-------|
+   | `DATABASE_URL` | `mongodb+srv://ronak:ronak2026@purompto.dxi3scc.mongodb.net/aaronyx?retryWrites=true&w=majority` |
+   | `JWT_SECRET` | `your-super-secret-jwt-key-here` |
+   
+   ⚠️ **Important**: Make sure to use the exact variable names above.
+
+4. **Configure MongoDB Atlas Network Access**
+   
+   - Go to MongoDB Atlas Dashboard
+   - Navigate to **Network Access** under Security
+   - Click **Add IP Address**
+   - Click **Allow Access from Anywhere** (adds `0.0.0.0/0`)
+   - Click **Confirm**
+   
+   This is required because Vercel uses dynamic IPs.
+
+5. **Deploy**
+   
+   Vercel will automatically deploy when you push to GitHub.
+
+### Troubleshooting Vercel Deployment
+
+**Error: "Error creating a database connection"**
+- ✅ Verify `DATABASE_URL` is set in Vercel Environment Variables
+- ✅ Ensure MongoDB Atlas allows access from `0.0.0.0/0`
+- ✅ Check that your MongoDB password is URL-encoded if it contains special characters
+
+**Error: "Prisma Client could not be generated"**
+- The build command should include `prisma generate`
+- Check `vercel.json` for proper build configuration
+
+### Docker (Alternative)
 
 ```dockerfile
 # Dockerfile
@@ -406,12 +451,7 @@ CMD ["npm", "start"]
 
 ```bash
 docker build -t aaronyx .
-docker run -p 3000:3000 aaronyx
-```
-
-### Vercel (Frontend)
-```bash
-vercel --prod
+docker run -p 3000:3000 -e DATABASE_URL="your-mongodb-url" -e JWT_SECRET="your-secret" aaronyx
 ```
 
 ### Manual Deployment
