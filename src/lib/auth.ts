@@ -87,38 +87,57 @@ export async function registerUser(username: string, password: string, email?: s
   try {
     // Hash password first
     const hashedPassword = await hashPassword(password);
+    const normalizedUsername = username.toLowerCase().trim();
     
-    // Try to create user directly - MongoDB will enforce unique constraint on username
-    try {
-      const user = await db.user.create({
-        data: {
-          username: username.toLowerCase().trim(),
-          password: hashedPassword,
-          email: email?.toLowerCase().trim() || null,
-          displayName: username.trim(),
-        },
+    // Check if username exists first
+    const existingUser = await db.user.findUnique({
+      where: { username: normalizedUsername },
+    });
+    
+    if (existingUser) {
+      return { error: 'Username already taken' };
+    }
+    
+    // Check email if provided
+    if (email) {
+      const normalizedEmail = email.toLowerCase().trim();
+      const existingEmail = await db.user.findUnique({
+        where: { email: normalizedEmail },
       });
       
-      return { user };
-    } catch (createError: unknown) {
-      // Check if it's a unique constraint violation
-      if (createError instanceof Prisma.PrismaClientKnownRequestError) {
-        if (createError.code === 'P2002') {
-          // Unique constraint failed - check which field
-          const target = createError.meta?.target as string[] | undefined;
-          if (target?.includes('username')) {
-            return { error: 'Username already taken' };
-          }
-          if (target?.includes('email')) {
-            return { error: 'Email already registered' };
-          }
-          return { error: 'This username or email is already in use' };
-        }
+      if (existingEmail) {
+        return { error: 'Email already registered' };
       }
-      throw createError;
     }
+    
+    // Create user
+    const user = await db.user.create({
+      data: {
+        username: normalizedUsername,
+        password: hashedPassword,
+        email: email?.toLowerCase().trim() || null,
+        displayName: username.trim(),
+      },
+    });
+    
+    return { user };
   } catch (error: unknown) {
     console.error('Registration error:', error);
+    
+    // Check if it's a unique constraint violation
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        const target = error.meta?.target as string[] | undefined;
+        if (target?.includes('username')) {
+          return { error: 'Username already taken' };
+        }
+        if (target?.includes('email')) {
+          return { error: 'Email already registered' };
+        }
+        return { error: 'This username or email is already in use' };
+      }
+    }
+    
     if (error instanceof Error) {
       return { error: error.message };
     }
@@ -128,11 +147,12 @@ export async function registerUser(username: string, password: string, email?: s
 
 export async function loginUser(username: string, password: string) {
   try {
-    // Find user by username (case insensitive)
-    const user = await db.user.findFirst({
-      where: { 
-        username: { equals: username.toLowerCase().trim(), mode: 'insensitive' } 
-      },
+    // Username is stored in lowercase, so query with lowercase
+    const normalizedUsername = username.toLowerCase().trim();
+    
+    // Find user by username using findUnique (username is unique)
+    const user = await db.user.findUnique({
+      where: { username: normalizedUsername },
     });
     
     if (!user) {
