@@ -110,13 +110,14 @@ export async function registerUser(username: string, password: string, email?: s
       }
     }
     
-    // Create user
+    // Create user with isOnline: true
     const user = await db.user.create({
       data: {
         username: normalizedUsername,
         password: hashedPassword,
         email: email?.toLowerCase().trim() || null,
         displayName: username.trim(),
+        isOnline: true,
       },
     });
     
@@ -166,13 +167,24 @@ export async function loginUser(username: string, password: string) {
       return { error: 'Invalid username or password' };
     }
     
-    // Update online status
-    await db.user.update({
+    // Update online status and return updated user
+    const updatedUser = await db.user.update({
       where: { id: user.id },
       data: { isOnline: true },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        displayName: true,
+        avatar: true,
+        bio: true,
+        isOnline: true,
+        lastSeen: true,
+        createdAt: true,
+      },
     });
     
-    return { user };
+    return { user: updatedUser };
   } catch (error: unknown) {
     console.error('Login error:', error);
     if (error instanceof Error) {

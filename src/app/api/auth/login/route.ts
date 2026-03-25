@@ -47,6 +47,8 @@ export async function POST(request: NextRequest) {
         displayName: result.user.displayName,
         avatar: result.user.avatar,
         bio: result.user.bio,
+        isOnline: result.user.isOnline,
+        lastSeen: result.user.lastSeen,
       },
     });
   } catch (error) {
