@@ -31,34 +31,39 @@ export function verifyToken(token: string): JWTPayload | null {
 }
 
 export async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value;
-  
-  if (!token) {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get('token')?.value;
+    
+    if (!token) {
+      return null;
+    }
+    
+    const payload = verifyToken(token);
+    if (!payload) {
+      return null;
+    }
+    
+    const user = await db.user.findUnique({
+      where: { id: payload.userId },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        displayName: true,
+        avatar: true,
+        bio: true,
+        isOnline: true,
+        lastSeen: true,
+        createdAt: true,
+      },
+    });
+    
+    return user;
+  } catch (error) {
+    console.error('Error getting current user:', error);
     return null;
   }
-  
-  const payload = verifyToken(token);
-  if (!payload) {
-    return null;
-  }
-  
-  const user = await db.user.findUnique({
-    where: { id: payload.userId },
-    select: {
-      id: true,
-      username: true,
-      email: true,
-      displayName: true,
-      avatar: true,
-      bio: true,
-      isOnline: true,
-      lastSeen: true,
-      createdAt: true,
-    },
-  });
-  
-  return user;
 }
 
 export async function setAuthCookie(token: string) {
@@ -78,73 +83,93 @@ export async function clearAuthCookie() {
 }
 
 export async function registerUser(username: string, password: string, email?: string) {
-  // Check if username already exists
-  const existingUser = await db.user.findUnique({
-    where: { username },
-  });
-  
-  if (existingUser) {
-    return { error: 'Username already taken' };
-  }
-  
-  // Check if email already exists (if provided)
-  if (email) {
-    const existingEmail = await db.user.findUnique({
-      where: { email },
+  try {
+    // Check if username already exists
+    const existingUser = await db.user.findUnique({
+      where: { username },
     });
     
-    if (existingEmail) {
-      return { error: 'Email already registered' };
+    if (existingUser) {
+      return { error: 'Username already taken' };
     }
+    
+    // Check if email already exists (if provided)
+    if (email) {
+      const existingEmail = await db.user.findUnique({
+        where: { email },
+      });
+      
+      if (existingEmail) {
+        return { error: 'Email already registered' };
+      }
+    }
+    
+    // Hash password and create user
+    const hashedPassword = await hashPassword(password);
+    
+    const user = await db.user.create({
+      data: {
+        username,
+        password: hashedPassword,
+        email: email || null,
+        displayName: username,
+      },
+    });
+    
+    return { user };
+  } catch (error: unknown) {
+    console.error('Registration error in registerUser:', error);
+    if (error instanceof Error) {
+      return { error: `Database error: ${error.message}` };
+    }
+    return { error: 'An unexpected error occurred during registration' };
   }
-  
-  // Hash password and create user
-  const hashedPassword = await hashPassword(password);
-  
-  const user = await db.user.create({
-    data: {
-      username,
-      password: hashedPassword,
-      email: email || null,
-      displayName: username,
-    },
-  });
-  
-  return { user };
 }
 
 export async function loginUser(username: string, password: string) {
-  // Find user by username
-  const user = await db.user.findUnique({
-    where: { username },
-  });
-  
-  if (!user) {
-    return { error: 'Invalid username or password' };
+  try {
+    // Find user by username
+    const user = await db.user.findUnique({
+      where: { username },
+    });
+    
+    if (!user) {
+      return { error: 'Invalid username or password' };
+    }
+    
+    // Verify password
+    const isValid = await verifyPassword(password, user.password);
+    
+    if (!isValid) {
+      return { error: 'Invalid username or password' };
+    }
+    
+    // Update online status
+    await db.user.update({
+      where: { id: user.id },
+      data: { isOnline: true },
+    });
+    
+    return { user };
+  } catch (error: unknown) {
+    console.error('Login error:', error);
+    if (error instanceof Error) {
+      return { error: `Database error: ${error.message}` };
+    }
+    return { error: 'An unexpected error occurred during login' };
   }
-  
-  // Verify password
-  const isValid = await verifyPassword(password, user.password);
-  
-  if (!isValid) {
-    return { error: 'Invalid username or password' };
-  }
-  
-  // Update online status
-  await db.user.update({
-    where: { id: user.id },
-    data: { isOnline: true },
-  });
-  
-  return { user };
 }
 
 export async function logoutUser(userId: string) {
-  await db.user.update({
-    where: { id: userId },
-    data: {
-      isOnline: false,
-      lastSeen: new Date(),
-    },
-  });
+  try {
+    await db.user.update({
+      where: { id: userId },
+      data: {
+        isOnline: false,
+        lastSeen: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+  }
 }
