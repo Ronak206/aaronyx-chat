@@ -126,97 +126,120 @@ export default function AaronyxApp() {
   // Connect socket when authenticated
   useEffect(() => {
     if (user && !socket) {
-      socket = io('/?XTransformPort=3003', {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: 10,
-      })
+      // Socket server URL - for local dev it's localhost:3003
+      // For production, set NEXT_PUBLIC_SOCKET_URL env variable
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+        ? 'http://localhost:3003' 
+        : null)
       
-      socket.on('connect', () => {
-        setIsSocketConnected(true)
-        socket?.emit('user:connect', { userId: user.id, username: user.username })
-      })
+      // Only connect if socket server is available
+      if (!socketUrl) {
+        console.log('No socket server configured - using polling for updates')
+        setIsSocketConnected(false)
+        return
+      }
       
-      socket.on('disconnect', () => setIsSocketConnected(false))
-      
-      // Message events
-      socket.on('message:received', (message: Message) => {
-        addMessage(message)
-        toast.info(`New message from ${message.sender?.username || 'Unknown'}`)
-      })
-      
-      socket.on('message:read', (data: { messageId: string }) => {
-        // Update message read status
-      })
-      
-      // Typing events
-      socket.on('typing:started', (data: { chatId: string; userId: string; username: string }) => {
-        setTyping(data.chatId, data.userId, true)
-      })
-      
-      socket.on('typing:stopped', (data: { chatId: string; userId: string }) => {
-        setTyping(data.chatId, data.userId, false)
-      })
-      
-      // Call events
-      socket.on('call:incoming', (data: { callerId: string; callerName: string; type: 'voice' | 'video'; offer: RTCSessionDescriptionInit }) => {
-        setCallPartner({ id: data.callerId, username: data.callerName })
-        setCallType(data.type)
-        setIsCaller(false)
-        setCallStatus('ringing')
-        // Handle incoming call - would show dialog
-      })
-      
-      socket.on('call:answered', async (data: { answer: RTCSessionDescriptionInit }) => {
-        if (peerConnection) {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer))
-          setCallStatus('connected')
-        }
-      })
-      
-      socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
-        if (peerConnection) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
-        }
-      })
-      
-      socket.on('call:ended', () => {
-        resetCall()
-        toast.info('Call ended')
-      })
-      
-      socket.on('call:declined', () => {
-        resetCall()
-        toast.error('Call was declined')
-      })
-      
-      // Room events
-      socket.on('room:user-joined', (data: { userId: string; username: string; avatar?: string }) => {
-        addParticipant({
-          id: data.userId,
-          userId: data.userId,
-          role: 'viewer',
-          user: { id: data.userId, username: data.username, avatar: data.avatar }
+      try {
+        socket = io(socketUrl, {
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
         })
-        toast.info(`${data.username} joined the room`)
-      })
-      
-      socket.on('room:user-left', (data: { userId: string; username: string }) => {
-        removeParticipant(data.userId)
-        toast.info(`${data.username} left the room`)
-      })
-      
-      socket.on('room:sync', (data: { action: 'play' | 'pause' | 'seek'; progress: number }) => {
-        setPlaybackState(data.action === 'play', data.progress)
-      })
-      
-      socket.on('room:message', (message: RoomMessage) => {
-        addRoomMessage(message)
-      })
-      
-      socket.on('room:state', (state: { isPlaying: boolean; currentProgress: number }) => {
-        setPlaybackState(state.isPlaying, state.currentProgress)
-      })
+        
+        socket.on('connect', () => {
+          setIsSocketConnected(true)
+          socket?.emit('user:connect', { userId: user.id, username: user.username })
+          console.log('Socket connected')
+        })
+        
+        socket.on('disconnect', () => {
+          setIsSocketConnected(false)
+          console.log('Socket disconnected')
+        })
+        
+        socket.on('connect_error', (error) => {
+          console.log('Socket connection error:', error.message)
+          setIsSocketConnected(false)
+        })
+        
+        // Message events
+        socket.on('message:received', (message: Message) => {
+          addMessage(message)
+          toast.info(`New message from ${message.sender?.username || 'Unknown'}`)
+        })
+        
+        // Typing events
+        socket.on('typing:started', (data: { chatId: string; userId: string; username: string }) => {
+          setTyping(data.chatId, data.userId, true)
+        })
+        
+        socket.on('typing:stopped', (data: { chatId: string; userId: string }) => {
+          setTyping(data.chatId, data.userId, false)
+        })
+        
+        // Call events
+        socket.on('call:incoming', (data: { callerId: string; callerName: string; type: 'voice' | 'video'; offer: RTCSessionDescriptionInit }) => {
+          setCallPartner({ id: data.callerId, username: data.callerName })
+          setCallType(data.type)
+          setIsCaller(false)
+          setCallStatus('ringing')
+        })
+        
+        socket.on('call:answered', async (data: { answer: RTCSessionDescriptionInit }) => {
+          if (peerConnection) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer))
+            setCallStatus('connected')
+          }
+        })
+        
+        socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
+          if (peerConnection) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
+          }
+        })
+        
+        socket.on('call:ended', () => {
+          resetCall()
+          toast.info('Call ended')
+        })
+        
+        socket.on('call:declined', () => {
+          resetCall()
+          toast.error('Call was declined')
+        })
+        
+        // Room events
+        socket.on('room:user-joined', (data: { userId: string; username: string; avatar?: string }) => {
+          addParticipant({
+            id: data.userId,
+            userId: data.userId,
+            role: 'viewer',
+            user: { id: data.userId, username: data.username, avatar: data.avatar }
+          })
+          toast.info(`${data.username} joined the room`)
+        })
+        
+        socket.on('room:user-left', (data: { userId: string; username: string }) => {
+          removeParticipant(data.userId)
+          toast.info(`${data.username} left the room`)
+        })
+        
+        socket.on('room:sync', (data: { action: 'play' | 'pause' | 'seek'; progress: number }) => {
+          setPlaybackState(data.action === 'play', data.progress)
+        })
+        
+        socket.on('room:message', (message: RoomMessage) => {
+          addRoomMessage(message)
+        })
+        
+        socket.on('room:state', (state: { isPlaying: boolean; currentProgress: number }) => {
+          setPlaybackState(state.isPlaying, state.currentProgress)
+        })
+      } catch (error) {
+        console.error('Socket initialization error:', error)
+        setIsSocketConnected(false)
+      }
     }
     
     return () => {
@@ -344,18 +367,25 @@ export default function AaronyxApp() {
         const res = await fetch(`/api/chats/${currentChat.id}/messages`)
         if (res.ok) {
           const data = await res.json()
-          // Only update if there are new messages
-          if (data.messages.length > messages.length) {
-            setMessages(data.messages)
-            markMessagesAsRead(currentChat.id)
-          } else if (data.messages.length === messages.length) {
-            // Check if status changed
-            const lastMsg = data.messages[data.messages.length - 1]
-            const currentLastMsg = messages[messages.length - 1]
-            if (lastMsg && currentLastMsg && lastMsg.status !== currentLastMsg.status) {
-              setMessages(data.messages)
-            }
-          }
+          // Merge messages - keep optimistic messages that haven't been confirmed yet
+          setMessages(prev => {
+            const optimisticIds = new Set(prev.filter(m => m.id.startsWith('temp-')).map(m => m.id))
+            const serverMessages = data.messages.filter((m: Message) => !optimisticIds.has(m.id))
+            const optimisticMessages = prev.filter(m => m.id.startsWith('temp-'))
+            
+            // Combine and deduplicate
+            const allMessages = [...serverMessages, ...optimisticMessages]
+            const uniqueMessages = allMessages.filter((msg, index, self) => 
+              index === self.findIndex(m => m.id === msg.id)
+            )
+            
+            return uniqueMessages.sort((a, b) => 
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            )
+          })
+          
+          // Mark messages as read
+          markMessagesAsRead(currentChat.id)
         }
       } catch (error) {
         console.error('Poll error:', error)
@@ -363,7 +393,7 @@ export default function AaronyxApp() {
     }, 3000) // Poll every 3 seconds
     
     return () => clearInterval(pollInterval)
-  }, [user, currentChat, messages.length])
+  }, [user, currentChat])
 
   // Load all users when new chat dialog opens
   const loadAllUsers = async () => {
@@ -509,7 +539,7 @@ export default function AaronyxApp() {
       setChatView('conversation')
       setShowNewChatDialog(false)
       setSearchQuery('')
-      setSearchResults([])
+      setFilteredUsers([])
       loadMessages(data.chat.id)
     } catch {
       toast.error('Failed to start chat')
@@ -519,14 +549,16 @@ export default function AaronyxApp() {
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !currentChat || !user) return
     
+    const content = messageInput.trim()
     const receiverIds = currentChat.members.map(m => m.id)
     
     // Optimistically add message
+    const tempId = `temp-${Date.now()}`
     const tempMessage: Message = {
-      id: `temp-${Date.now()}`,
+      id: tempId,
       chatId: currentChat.id,
       senderId: user.id,
-      content: messageInput,
+      content: content,
       type: 'text',
       status: 'sent',
       createdAt: new Date(),
@@ -538,6 +570,7 @@ export default function AaronyxApp() {
       },
     }
     
+    // Add optimistic message immediately
     addMessage(tempMessage)
     setMessageInput('')
     
@@ -546,20 +579,16 @@ export default function AaronyxApp() {
       const res = await fetch(`/api/chats/${currentChat.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: messageInput }),
+        body: JSON.stringify({ content }),
       })
       const data = await res.json()
       
-      // Update with real message
-      setMessages(messages.map(m => m.id === tempMessage.id ? data.message : m))
-      
-      // Emit via socket
-      socket?.emit('message:send', {
-        chatId: currentChat.id,
-        senderId: user.id,
-        content: messageInput,
-        receiverIds,
-      })
+      if (res.ok && data.message) {
+        // Replace temp message with real message from server
+        setMessages(prev => prev.map(m => m.id === tempId ? data.message : m))
+      } else {
+        toast.error(data.error || 'Failed to send message')
+      }
     } catch {
       toast.error('Failed to send message')
     }
@@ -588,6 +617,12 @@ export default function AaronyxApp() {
 
   // Call handlers
   const startCall = async (type: 'voice' | 'video', targetUser: User) => {
+    // Check if socket is connected (required for calls)
+    if (!isSocketConnected) {
+      toast.error('Calls require real-time connection. Please refresh the page or try again later.')
+      return
+    }
+    
     try {
       // Get user media
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -643,7 +678,7 @@ export default function AaronyxApp() {
       
     } catch (error) {
       console.error('Failed to start call:', error)
-      toast.error('Failed to access camera/microphone')
+      toast.error('Failed to access camera/microphone. Please check permissions.')
     }
   }
 
@@ -1036,7 +1071,7 @@ export default function AaronyxApp() {
                             )}
                           </div>
                           <div className="flex items-center gap-1">
-                            {chat.lastMessage?.senderId === user?.id && (
+                            {chat.lastMessage?.senderId === user?.id && chat.lastMessage && (
                               <span>
                                 {chat.lastMessage.status === 'read' ? (
                                   <CheckCheck className="h-3 w-3 text-blue-400" />

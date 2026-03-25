@@ -47,7 +47,7 @@ interface ChatState {
   setChats: (chats: Chat[]) => void
   addChat: (chat: Chat) => void
   setCurrentChat: (chat: Chat | null) => void
-  setMessages: (messages: Message[]) => void
+  setMessages: (messages: Message[] | ((prev: Message[]) => Message[])) => void
   addMessage: (message: Message) => void
   setTyping: (chatId: string, userId: string, isTyping: boolean) => void
   setMessagesLoading: (loading: boolean) => void
@@ -70,7 +70,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   
   setCurrentChat: (chat) => set({ currentChat: chat, messages: [] }),
   
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) => {
+    if (typeof messages === 'function') {
+      set((state) => ({ messages: messages(state.messages) }))
+    } else {
+      set({ messages })
+    }
+  },
   
   addMessage: (message) => set((state) => {
     // Update chat's last message and move to top
