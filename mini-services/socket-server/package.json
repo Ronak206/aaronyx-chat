@@ -1,0 +1,13 @@
+{
+  "name": "aaronyx-socket-server",
+  "version": "1.0.0",
+  "description": "Aaronyx WebSocket Server",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "bun --hot run index.ts",
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  }
+}

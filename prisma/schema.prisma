@@ -1,0 +1,176 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// Users - Username-based auth
+model User {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  username      String    @unique
+  email         String?   @unique
+  password      String
+  displayName   String?
+  avatar        String?
+  bio           String?
+  isOnline      Boolean   @default(false)
+  lastSeen      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  sentMessages       Message[]           @relation("SentMessages")
+  receivedMessages   MessageReceiver[]   @relation("ReceivedMessages")
+  chats              ChatMember[]
+  groups             GroupMember[]
+  createdGroups      Group[]             @relation("GroupCreator")
+  createdRooms       MovieRoom[]         @relation("RoomCreator")
+  roomParticipants   RoomParticipant[]
+  roomMessages       RoomMessage[]
+  callsAsCaller      Call[]              @relation("Caller")
+  callsAsReceiver    Call[]              @relation("Receiver")
+}
+
+// Individual Chats (1-1)
+model Chat {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  type        String   @default("direct")
+  name        String?
+  avatar      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  members     ChatMember[]
+  messages    Message[]
+}
+
+model ChatMember {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  chatId    String   @db.ObjectId
+  userId    String   @db.ObjectId
+  joinedAt  DateTime @default(now())
+  
+  chat      Chat     @relation(fields: [chatId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([chatId, userId])
+}
+
+// Messages
+model Message {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  chatId      String    @db.ObjectId
+  senderId    String    @db.ObjectId
+  content     String
+  type        String    @default("text")
+  mediaUrl    String?
+  status      String    @default("sent")
+  createdAt   DateTime  @default(now())
+  
+  chat        Chat      @relation(fields: [chatId], references: [id])
+  sender      User      @relation("SentMessages", fields: [senderId], references: [id])
+  receivers   MessageReceiver[]
+}
+
+model MessageReceiver {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  messageId   String    @db.ObjectId
+  receiverId  String    @db.ObjectId
+  status      String    @default("delivered")
+  readAt      DateTime?
+  
+  message     Message   @relation(fields: [messageId], references: [id])
+  receiver    User      @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  
+  @@unique([messageId, receiverId])
+}
+
+// Groups
+model Group {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  description String?
+  avatar      String?
+  createdById String   @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  createdBy   User         @relation("GroupCreator", fields: [createdById], references: [id])
+  members     GroupMember[]
+}
+
+model GroupMember {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  groupId  String   @db.ObjectId
+  userId   String   @db.ObjectId
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+  
+  group    Group    @relation(fields: [groupId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+  
+  @@unique([groupId, userId])
+}
+
+// Movie Rooms (Teleparty-like)
+model MovieRoom {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  name            String
+  description     String?
+  createdById     String   @db.ObjectId
+  videoUrl        String?
+  videoType       String   @default("youtube")
+  isPublic        Boolean  @default(true)
+  maxParticipants Int      @default(20)
+  currentProgress Float    @default(0)
+  isPlaying       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  
+  createdBy       User              @relation("RoomCreator", fields: [createdById], references: [id])
+  participants    RoomParticipant[]
+  messages        RoomMessage[]
+}
+
+model RoomParticipant {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  roomId   String   @db.ObjectId
+  userId   String   @db.ObjectId
+  role     String   @default("viewer")
+  joinedAt DateTime @default(now())
+  
+  room     MovieRoom @relation(fields: [roomId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  
+  @@unique([roomId, userId])
+}
+
+model RoomMessage {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  roomId    String    @db.ObjectId
+  userId    String    @db.ObjectId
+  content   String
+  createdAt DateTime  @default(now())
+  
+  room      MovieRoom @relation(fields: [roomId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+// Call Logs
+model Call {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  callerId    String    @db.ObjectId
+  receiverId  String    @db.ObjectId
+  type        String
+  status      String    @default("missed")
+  duration    Int?
+  createdAt   DateTime  @default(now())
+  
+  caller      User      @relation("Caller", fields: [callerId], references: [id])
+  receiver    User      @relation("Receiver", fields: [receiverId], references: [id])
+}
