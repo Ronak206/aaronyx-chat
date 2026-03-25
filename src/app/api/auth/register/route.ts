@@ -14,9 +14,19 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    if (username.length < 3 || username.length > 20) {
+    const trimmedUsername = username.trim();
+    
+    if (trimmedUsername.length < 3 || trimmedUsername.length > 20) {
       return NextResponse.json(
         { error: 'Username must be between 3 and 20 characters' },
+        { status: 400 }
+      );
+    }
+
+    // Only allow alphanumeric and underscore
+    if (!/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
+      return NextResponse.json(
+        { error: 'Username can only contain letters, numbers, and underscores' },
         { status: 400 }
       );
     }
@@ -29,7 +39,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Register user
-    const result = await registerUser(username, password, email);
+    const result = await registerUser(trimmedUsername, password, email);
     
     if (result.error) {
       return NextResponse.json(
@@ -65,8 +75,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Registration error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: errorMessage },
       { status: 500 }
     );
   }

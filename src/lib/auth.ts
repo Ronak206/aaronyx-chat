@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { cookies } from 'next/headers';
 import { db } from './db';
+import { Prisma } from '@prisma/client';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'aaronyx-secret-key-2024';
 
@@ -84,53 +85,54 @@ export async function clearAuthCookie() {
 
 export async function registerUser(username: string, password: string, email?: string) {
   try {
-    // Check if username already exists
-    const existingUser = await db.user.findUnique({
-      where: { username },
-    });
-    
-    if (existingUser) {
-      return { error: 'Username already taken' };
-    }
-    
-    // Check if email already exists (if provided)
-    if (email) {
-      const existingEmail = await db.user.findUnique({
-        where: { email },
-      });
-      
-      if (existingEmail) {
-        return { error: 'Email already registered' };
-      }
-    }
-    
-    // Hash password and create user
+    // Hash password first
     const hashedPassword = await hashPassword(password);
     
-    const user = await db.user.create({
-      data: {
-        username,
-        password: hashedPassword,
-        email: email || null,
-        displayName: username,
-      },
-    });
-    
-    return { user };
-  } catch (error: unknown) {
-    console.error('Registration error in registerUser:', error);
-    if (error instanceof Error) {
-      return { error: `Database error: ${error.message}` };
+    // Try to create user directly - MongoDB will enforce unique constraint on username
+    try {
+      const user = await db.user.create({
+        data: {
+          username: username.toLowerCase().trim(),
+          password: hashedPassword,
+          email: email?.toLowerCase().trim() || null,
+          displayName: username.trim(),
+        },
+      });
+      
+      return { user };
+    } catch (createError: unknown) {
+      // Check if it's a unique constraint violation
+      if (createError instanceof Prisma.PrismaClientKnownRequestError) {
+        if (createError.code === 'P2002') {
+          // Unique constraint failed - check which field
+          const target = createError.meta?.target as string[] | undefined;
+          if (target?.includes('username')) {
+            return { error: 'Username already taken' };
+          }
+          if (target?.includes('email')) {
+            return { error: 'Email already registered' };
+          }
+          return { error: 'This username or email is already in use' };
+        }
+      }
+      throw createError;
     }
-    return { error: 'An unexpected error occurred during registration' };
+  } catch (error: unknown) {
+    console.error('Registration error:', error);
+    if (error instanceof Error) {
+      return { error: error.message };
+    }
+    return { error: 'An unexpected error occurred' };
   }
 }
 
 export async function loginUser(username: string, password: string) {
   try {
-    // Find user by username
-    const user = await db.user.findUnique({
-      where: { username },
+    // Find user by username (case insensitive)
+    const user = await db.user.findFirst({
+      where: { 
+        username: { equals: username.toLowerCase().trim(), mode: 'insensitive' } 
+      },
     });
     
     if (!user) {
@@ -154,9 +156,9 @@ export async function loginUser(username: string, password: string) {
   } catch (error: unknown) {
     console.error('Login error:', error);
     if (error instanceof Error) {
-      return { error: `Database error: ${error.message}` };
+      return { error: error.message };
     }
-    return { error: 'An unexpected error occurred during login' };
+    return { error: 'An unexpected error occurred' };
   }
 }
 
