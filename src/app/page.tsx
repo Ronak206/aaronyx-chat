@@ -18,15 +18,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import EmojiPicker from 'emoji-picker-react'
 import { 
   MessageCircle, Video, Film, User as UserIcon, Settings, LogOut, Search, 
   Send, Phone, PhoneOff, Mic, MicOff, VideoOff, Share2, Users, Plus, 
   Moon, Sun, Check, CheckCheck, Play, Pause, SkipForward, Clock,
   Monitor, MonitorOff, X, Smile, Paperclip, MoreVertical, UserPlus,
-  Hash, Volume2, VolumeX
+  Hash, Volume2, VolumeX, Image as ImageIcon, FileText, Bell, BellOff
 } from 'lucide-react'
 import { toast } from 'sonner'
-import ReactPlayer from 'react-player'
 
 // Socket instance
 let socket: Socket | null = null
@@ -82,6 +83,10 @@ export default function AaronyxApp() {
   const [newRoomVideoUrl, setNewRoomVideoUrl] = useState('')
   const [editForm, setEditForm] = useState({ displayName: '', bio: '', avatar: '' })
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+  const [jitsiRoom, setJitsiRoom] = useState<string | null>(null)
   
   // Auth forms
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
@@ -95,6 +100,8 @@ export default function AaronyxApp() {
   // Chat container ref for auto-scroll
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const roomChatRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const jitsiRef = useRef<HTMLDivElement>(null)
 
   // Theme effect
   useEffect(() => {
@@ -104,6 +111,156 @@ export default function AaronyxApp() {
       document.documentElement.classList.remove('dark')
     }
   }, [theme])
+
+  // Request notification permission
+  useEffect(() => {
+    if (user && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        setNotificationsEnabled(true)
+      } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(permission => {
+          setNotificationsEnabled(permission === 'granted')
+        })
+      }
+    }
+  }, [user])
+
+  // Show browser notification
+  const showNotification = useCallback((title: string, body: string, icon?: string) => {
+    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+      new Notification(title, { body, icon: icon || '/logo.svg' })
+    }
+  }, [])
+
+  // Toggle notifications
+  const toggleNotifications = async () => {
+    if ('Notification' in window) {
+      if (Notification.permission === 'granted') {
+        setNotificationsEnabled(false)
+      } else {
+        const permission = await Notification.requestPermission()
+        setNotificationsEnabled(permission === 'granted')
+      }
+    }
+  }
+
+  // Jitsi Meet API loading
+  const loadJitsiScript = useCallback(() => {
+    return new Promise<void>((resolve) => {
+      if (window.JitsiMeetExternalAPI) {
+        resolve()
+        return
+      }
+      const script = document.createElement('script')
+      script.src = 'https://meet.jit.si/external_api.js'
+      script.async = true
+      script.onload = () => resolve()
+      document.body.appendChild(script)
+    })
+  }, [])
+
+  // Start Jitsi call
+  const startJitsiCall = async (type: 'voice' | 'video', targetUser: User) => {
+    try {
+      await loadJitsiScript()
+      
+      const roomName = `aaronyx-${currentChat?.id || Date.now()}-${user?.id}-${targetUser.id}`
+      setJitsiRoom(roomName)
+      setCallPartner(targetUser)
+      setCallType(type)
+      setInCall(true)
+      setCallStatus('connected')
+      
+      toast.success(`Starting ${type} call with ${targetUser.username}`)
+    } catch (error) {
+      console.error('Failed to start Jitsi call:', error)
+      toast.error('Failed to start video call')
+    }
+  }
+
+  // End Jitsi call
+  const endJitsiCall = () => {
+    setJitsiRoom(null)
+    setInCall(false)
+    setCallPartner(null)
+    resetCall()
+    toast.info('Call ended')
+  }
+
+  // File upload handler
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !currentChat || !user) return
+    
+    setIsUploading(true)
+    
+    try {
+      // For now, we'll convert to base64 and store as text
+      // In production, you'd upload to a cloud storage service
+      const reader = new FileReader()
+      reader.onload = async () => {
+        const base64 = reader.result as string
+        
+        // Determine file type
+        let messageType = 'file'
+        if (file.type.startsWith('image/')) messageType = 'image'
+        else if (file.type.startsWith('video/')) messageType = 'video'
+        else if (file.type.startsWith('audio/')) messageType = 'audio'
+        
+        const tempId = `temp-${Date.now()}`
+        const tempMessage: Message = {
+          id: tempId,
+          chatId: currentChat.id,
+          senderId: user.id,
+          content: `📎 ${file.name}`,
+          type: messageType,
+          mediaUrl: base64,
+          status: 'sent',
+          createdAt: new Date(),
+          sender: {
+            id: user.id,
+            username: user.username,
+            displayName: user.displayName,
+            avatar: user.avatar,
+          },
+        }
+        
+        addMessage(tempMessage)
+        
+        // Send to API
+        fetch(`/api/chats/${currentChat.id}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            content: file.name,
+            type: messageType,
+            mediaUrl: base64 
+          }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.message) {
+              setMessages(prev => prev.map(m => m.id === tempId ? data.message : m))
+            }
+          })
+          .catch(err => console.error('Upload error:', err))
+      }
+      
+      reader.readAsDataURL(file)
+    } catch (error) {
+      toast.error('Failed to upload file')
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  // Emoji handler
+  const onEmojiClick = (emojiData: { emoji: string }) => {
+    setMessageInput(prev => prev + emojiData.emoji)
+  }
 
   // Check auth on mount
   useEffect(() => {
@@ -166,7 +323,10 @@ export default function AaronyxApp() {
         // Message events
         socket.on('message:received', (message: Message) => {
           addMessage(message)
-          toast.info(`New message from ${message.sender?.username || 'Unknown'}`)
+          const senderName = message.sender?.displayName || message.sender?.username || 'Unknown'
+          toast.info(`New message from ${senderName}`)
+          // Show browser notification
+          showNotification(`${senderName} sent a message`, message.content.slice(0, 50), message.sender?.avatar || undefined)
         })
         
         // Typing events
@@ -1128,12 +1288,15 @@ export default function AaronyxApp() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => startCall('voice', currentChat.members[0])}
+                            onClick={() => {
+                              const otherUser = currentChat.members.find(m => m.id !== user?.id)
+                              if (otherUser) startJitsiCall('voice', otherUser)
+                            }}
                           >
                             <Phone className="h-5 w-5" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>Voice Call</TooltipContent>
+                        <TooltipContent>Voice Call (Jitsi)</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                     <TooltipProvider>
@@ -1142,12 +1305,15 @@ export default function AaronyxApp() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => startCall('video', currentChat.members[0])}
+                            onClick={() => {
+                              const otherUser = currentChat.members.find(m => m.id !== user?.id)
+                              if (otherUser) startJitsiCall('video', otherUser)
+                            }}
                           >
                             <Video className="h-5 w-5" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>Video Call</TooltipContent>
+                        <TooltipContent>Video Call (Jitsi)</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </div>
@@ -1201,10 +1367,50 @@ export default function AaronyxApp() {
 
                 {/* Message Input */}
                 <div className="p-4 border-t shrink-0">
+                  {/* Hidden file input */}
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
+                  />
+                  
+                  {/* Emoji Picker Popover */}
+                  <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+                    <PopoverContent className="w-80 p-0" align="bottom-start">
+                      <EmojiPicker 
+                        onEmojiClick={(emojiData) => {
+                          setMessageInput(prev => prev + emojiData.emoji)
+                        }}
+                        width="100%"
+                        height={350}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon">
-                      <Paperclip className="h-5 w-5" />
-                    </Button>
+                    {/* File Upload Button */}
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button 
+                            variant="ghost" 
+                            size="icon"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading}
+                          >
+                            {isUploading ? (
+                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                            ) : (
+                              <Paperclip className="h-5 w-5" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Attach file</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    
                     <Input
                       placeholder="Type a message..."
                       value={messageInput}
@@ -1222,10 +1428,18 @@ export default function AaronyxApp() {
                       }}
                       className="flex-1"
                     />
-                    <Button variant="ghost" size="icon">
-                      <Smile className="h-5 w-5" />
-                    </Button>
-                    <Button size="icon" onClick={handleSendMessage} disabled={!messageInput.trim()}>
+                    
+                    {/* Emoji Button */}
+                    <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+                      <PopoverTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <Smile className="h-5 w-5" />
+                        </Button>
+                      </PopoverTrigger>
+                    </Popover>
+                    
+                    {/* Send Button */}
+                    <Button size="icon" onClick={handleSendMessage} disabled={!messageInput.trim() && !isUploading}>
                       <Send className="h-5 w-5" />
                     </Button>
                   </div>
@@ -1247,11 +1461,30 @@ export default function AaronyxApp() {
         {view === 'calls' && (
           <div className="flex-1 flex flex-col">
             <div className="p-4 border-b">
-              <h2 className="font-semibold text-lg">Call History</h2>
+              <h2 className="font-semibold text-lg">Calls</h2>
             </div>
             
-            {isInCall ? (
-              // Active Call UI
+            {jitsiRoom ? (
+              // Jitsi Call UI
+              <div className="flex-1 relative bg-black">
+                <iframe
+                  src={`https://meet.jit.si/${jitsiRoom}#config.startWithVideoMuted=${callType === 'voice'}&config.startWithAudioMuted=false&config.prejoinPageEnabled=false&config.disableDeepLinking=true`}
+                  className="w-full h-full border-0"
+                  allow="camera; microphone; fullscreen; display-capture; autoplay"
+                  title="Jitsi Meet"
+                />
+                <Button
+                  variant="destructive"
+                  size="lg"
+                  className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full"
+                  onClick={endJitsiCall}
+                >
+                  <PhoneOff className="h-5 w-5 mr-2" />
+                  End Call
+                </Button>
+              </div>
+            ) : isInCall ? (
+              // Active Call UI (Legacy)
               <div className="flex-1 flex flex-col bg-black">
                 {/* Video Grid */}
                 <div className="flex-1 relative">
