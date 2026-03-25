@@ -44,12 +44,12 @@ export async function GET() {
     
     return NextResponse.json({
       call: {
+        callId: incomingCall.id,
         callerId: incomingCall.callerId,
         callerName: incomingCall.caller.displayName || incomingCall.caller.username,
         callerAvatar: incomingCall.caller.avatar,
         roomName,
         type: incomingCall.type,
-        callId: incomingCall.id,
       },
     });
   } catch (error) {

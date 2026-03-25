@@ -87,8 +87,9 @@ export default function AaronyxApp() {
   const [isUploading, setIsUploading] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(false)
   const [jitsiRoom, setJitsiRoom] = useState<string | null>(null)
-  const [incomingCall, setIncomingCall] = useState<{callerId: string, callerName: string, callerAvatar?: string, roomName: string, type: 'voice' | 'video'} | null>(null)
+  const [incomingCall, setIncomingCall] = useState<{callId: string, callerId: string, callerName: string, callerAvatar?: string, roomName: string, type: 'voice' | 'video'} | null>(null)
   const [showIncomingCallDialog, setShowIncomingCallDialog] = useState(false)
+  const [currentCallId, setCurrentCallId] = useState<string | null>(null) // Track outgoing call ID
   
   // Auth forms
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
@@ -164,8 +165,6 @@ export default function AaronyxApp() {
   // Start Jitsi call - sends invitation to other user
   const startJitsiCall = async (type: 'voice' | 'video', targetUser: User) => {
     try {
-      const roomName = `aaronyx-${currentChat?.id || Date.now()}-${user?.id}-${targetUser.id}`
-      
       // Create call invitation in database
       const res = await fetch('/api/calls/create', {
         method: 'POST',
@@ -173,7 +172,6 @@ export default function AaronyxApp() {
         body: JSON.stringify({
           receiverId: targetUser.id,
           type,
-          roomName
         })
       })
       
@@ -181,6 +179,12 @@ export default function AaronyxApp() {
         throw new Error('Failed to create call')
       }
       
+      const data = await res.json()
+      const callId = data.callId
+      const roomName = `aaronyx-${callId}-${user?.id}-${targetUser.id}`
+      
+      // Store call ID for status polling
+      setCurrentCallId(callId)
       setJitsiRoom(roomName)
       setCallPartner(targetUser)
       setCallType(type)
@@ -201,20 +205,26 @@ export default function AaronyxApp() {
   const acceptIncomingCall = async () => {
     if (!incomingCall) return
     
-    setJitsiRoom(incomingCall.roomName)
+    // Mark call as accepted
+    const res = await fetch('/api/calls/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId: incomingCall.callId, status: 'accepted' })
+    })
+    
+    if (res.ok) {
+      const data = await res.json()
+      setJitsiRoom(data.roomName || incomingCall.roomName)
+    } else {
+      setJitsiRoom(incomingCall.roomName)
+    }
+    
     setCallPartner({ id: incomingCall.callerId, username: incomingCall.callerName, avatar: incomingCall.callerAvatar })
     setCallType(incomingCall.type)
     setInCall(true)
     setCallStatus('connected')
     setShowIncomingCallDialog(false)
     setIncomingCall(null)
-    
-    // Mark call as accepted
-    await fetch('/api/calls/respond', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomName: incomingCall.roomName, status: 'accepted' })
-    })
     
     toast.success('Call connected!')
   }
@@ -227,7 +237,7 @@ export default function AaronyxApp() {
     await fetch('/api/calls/respond', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomName: incomingCall.roomName, status: 'declined' })
+      body: JSON.stringify({ callId: incomingCall.callId, status: 'declined' })
     })
     
     setShowIncomingCallDialog(false)
@@ -260,11 +270,45 @@ export default function AaronyxApp() {
     return () => clearInterval(interval)
   }, [user, showIncomingCallDialog, showNotification])
 
+  // Poll for call status (for caller to know when accepted/declined)
+  useEffect(() => {
+    if (!user || !currentCallId || callStatus !== 'calling') return
+    
+    const pollCallStatus = async () => {
+      try {
+        const res = await fetch(`/api/calls/status?callId=${currentCallId}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.call) {
+            if (data.call.status === 'accepted') {
+              setCallStatus('connected')
+              toast.success(`${callPartner?.username} answered the call!`)
+            } else if (data.call.status === 'declined') {
+              // End the call
+              setJitsiRoom(null)
+              setInCall(false)
+              setCallPartner(null)
+              setCurrentCallId(null)
+              resetCall()
+              toast.error(`${callPartner?.username} declined the call`)
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling call status:', error)
+      }
+    }
+    
+    const interval = setInterval(pollCallStatus, 2000)
+    return () => clearInterval(interval)
+  }, [user, currentCallId, callStatus, callPartner, setCallStatus, resetCall])
+
   // End Jitsi call
   const endJitsiCall = () => {
     setJitsiRoom(null)
     setInCall(false)
     setCallPartner(null)
+    setCurrentCallId(null)
     resetCall()
     toast.info('Call ended')
   }

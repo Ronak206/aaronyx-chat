@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 
-// Respond to a call (accept or decline)
-export async function POST(request: NextRequest) {
+// Check call status (for caller to know if call was accepted/declined)
+export async function GET(request: NextRequest) {
   try {
     const currentUser = await getCurrentUser();
     
@@ -14,19 +14,12 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const body = await request.json();
-    const { callId, status } = body;
+    const { searchParams } = new URL(request.url);
+    const callId = searchParams.get('callId');
     
-    if (!callId || !status) {
+    if (!callId) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
-    }
-    
-    if (!['accepted', 'declined'].includes(status)) {
-      return NextResponse.json(
-        { error: 'Invalid status' },
+        { error: 'Call ID is required' },
         { status: 400 }
       );
     }
@@ -34,6 +27,16 @@ export async function POST(request: NextRequest) {
     // Find the call
     const call = await db.call.findUnique({
       where: { id: callId },
+      include: {
+        receiver: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatar: true,
+          },
+        },
+      },
     });
     
     if (!call) {
@@ -43,30 +46,28 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Verify user is the receiver
-    if (call.receiverId !== currentUser.id) {
+    // Verify user is the caller
+    if (call.callerId !== currentUser.id) {
       return NextResponse.json(
         { error: 'Not authorized' },
         { status: 403 }
       );
     }
     
-    // Update call status
-    const updatedCall = await db.call.update({
-      where: { id: callId },
-      data: { status },
-    });
-    
-    // Generate room name for accepted calls
+    // Generate room name
     const roomName = `aaronyx-${callId}-${call.callerId}-${call.receiverId}`;
     
-    return NextResponse.json({ 
-      success: true, 
-      call: updatedCall,
-      roomName
+    return NextResponse.json({
+      call: {
+        id: call.id,
+        status: call.status,
+        type: call.type,
+        receiver: call.receiver,
+        roomName,
+      },
     });
   } catch (error) {
-    console.error('Respond to call error:', error);
+    console.error('Check call status error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
