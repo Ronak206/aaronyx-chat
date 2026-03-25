@@ -76,9 +76,12 @@ export default function AaronyxApp() {
   const [isTyping, setIsTyping] = useState(false)
   const [showNewChatDialog, setShowNewChatDialog] = useState(false)
   const [showNewRoomDialog, setShowNewRoomDialog] = useState(false)
+  const [showEditProfileDialog, setShowEditProfileDialog] = useState(false)
   const [roomMessageInput, setRoomMessageInput] = useState('')
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomVideoUrl, setNewRoomVideoUrl] = useState('')
+  const [editForm, setEditForm] = useState({ displayName: '', bio: '', avatar: '' })
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false)
   
   // Auth forms
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
@@ -395,6 +398,41 @@ export default function AaronyxApp() {
       toast.success('Logged out')
     } catch {
       toast.error('Logout failed')
+    }
+  }
+
+  const handleUpdateProfile = async () => {
+    if (!user) return
+    setIsUpdatingProfile(true)
+    try {
+      const res = await fetch('/api/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setUser(data.user)
+        setShowEditProfileDialog(false)
+        toast.success('Profile updated!')
+      } else {
+        toast.error(data.error || 'Failed to update profile')
+      }
+    } catch {
+      toast.error('Failed to update profile')
+    } finally {
+      setIsUpdatingProfile(false)
+    }
+  }
+
+  const openEditProfile = () => {
+    if (user) {
+      setEditForm({
+        displayName: user.displayName || '',
+        bio: user.bio || '',
+        avatar: user.avatar || '',
+      })
+      setShowEditProfileDialog(true)
     }
   }
 
@@ -1514,14 +1552,14 @@ export default function AaronyxApp() {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Status</span>
-                      <Badge variant={isSocketConnected ? 'default' : 'secondary'}>
-                        {isSocketConnected ? 'Online' : 'Offline'}
+                      <Badge variant={user?.isOnline ? 'default' : 'secondary'} className={user?.isOnline ? 'bg-green-500 hover:bg-green-600' : ''}>
+                        {user?.isOnline ? 'Online' : 'Offline'}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Member since</span>
                       <span className="text-sm">
-                        {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
+                        {user?.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Just now'}
                       </span>
                     </div>
                   </div>
@@ -1529,7 +1567,7 @@ export default function AaronyxApp() {
                   <Separator className="my-6" />
                   
                   <div className="space-y-2">
-                    <Button variant="outline" className="w-full justify-start gap-2">
+                    <Button variant="outline" className="w-full justify-start gap-2" onClick={openEditProfile}>
                       <Settings className="h-4 w-4" />
                       Edit Profile
                     </Button>
@@ -1556,6 +1594,44 @@ export default function AaronyxApp() {
           </div>
         )}
       </div>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={showEditProfileDialog} onOpenChange={setShowEditProfileDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Profile</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Display Name</label>
+              <Input
+                placeholder="Your display name"
+                value={editForm.displayName}
+                onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Bio</label>
+              <Input
+                placeholder="Tell us about yourself"
+                value={editForm.bio}
+                onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Avatar URL</label>
+              <Input
+                placeholder="https://example.com/avatar.png"
+                value={editForm.avatar}
+                onChange={(e) => setEditForm({ ...editForm, avatar: e.target.value })}
+              />
+            </div>
+            <Button className="w-full" onClick={handleUpdateProfile} disabled={isUpdatingProfile}>
+              {isUpdatingProfile ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Incoming Call Dialog */}
       <Dialog open={callStatus === 'ringing' && !isCaller} onOpenChange={(open) => !open && declineCall()}>

@@ -64,16 +64,7 @@ export async function POST(request: NextRequest) {
     await setAuthCookie(token);
     
     return NextResponse.json({
-      user: {
-        id: result.user.id,
-        username: result.user.username,
-        email: result.user.email,
-        displayName: result.user.displayName,
-        avatar: result.user.avatar,
-        bio: result.user.bio,
-        isOnline: result.user.isOnline,
-        lastSeen: result.user.lastSeen,
-      },
+      user: result.user,
     });
   } catch (error) {
     console.error('Registration error:', error);

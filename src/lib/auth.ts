@@ -6,6 +6,19 @@ import { Prisma } from '@prisma/client';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'aaronyx-secret-key-2024';
 
+// Fields to select for user responses
+const USER_SELECT = {
+  id: true,
+  username: true,
+  email: true,
+  displayName: true,
+  avatar: true,
+  bio: true,
+  isOnline: true,
+  lastSeen: true,
+  createdAt: true,
+};
+
 export interface JWTPayload {
   userId: string;
   username: string;
@@ -47,17 +60,7 @@ export async function getCurrentUser() {
     
     const user = await db.user.findUnique({
       where: { id: payload.userId },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        displayName: true,
-        avatar: true,
-        bio: true,
-        isOnline: true,
-        lastSeen: true,
-        createdAt: true,
-      },
+      select: USER_SELECT,
     });
     
     return user;
@@ -119,6 +122,7 @@ export async function registerUser(username: string, password: string, email?: s
         displayName: username.trim(),
         isOnline: true,
       },
+      select: USER_SELECT,
     });
     
     return { user };
@@ -171,17 +175,7 @@ export async function loginUser(username: string, password: string) {
     const updatedUser = await db.user.update({
       where: { id: user.id },
       data: { isOnline: true },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        displayName: true,
-        avatar: true,
-        bio: true,
-        isOnline: true,
-        lastSeen: true,
-        createdAt: true,
-      },
+      select: USER_SELECT,
     });
     
     return { user: updatedUser };
