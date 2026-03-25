@@ -273,7 +273,10 @@ export default function AaronyxApp() {
   // Auto-scroll chat
   useEffect(() => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+      const scrollContainer = chatContainerRef.current.querySelector('[data-radix-scroll-area-viewport]')
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight
+      }
     }
   }, [messages])
 
@@ -546,11 +549,10 @@ export default function AaronyxApp() {
     }
   }
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = () => {
     if (!messageInput.trim() || !currentChat || !user) return
     
     const content = messageInput.trim()
-    const receiverIds = currentChat.members.map(m => m.id)
     
     // Optimistically add message
     const tempId = `temp-${Date.now()}`
@@ -574,24 +576,22 @@ export default function AaronyxApp() {
     addMessage(tempMessage)
     setMessageInput('')
     
-    // Send to API
-    try {
-      const res = await fetch(`/api/chats/${currentChat.id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+    // Send to API in background (don't await - instant response)
+    fetch(`/api/chats/${currentChat.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.message) {
+          // Replace temp message with real message from server
+          setMessages(prev => prev.map(m => m.id === tempId ? data.message : m))
+        }
       })
-      const data = await res.json()
-      
-      if (res.ok && data.message) {
-        // Replace temp message with real message from server
-        setMessages(prev => prev.map(m => m.id === tempId ? data.message : m))
-      } else {
-        toast.error(data.error || 'Failed to send message')
-      }
-    } catch {
-      toast.error('Failed to send message')
-    }
+      .catch(err => {
+        console.error('Failed to send message:', err)
+      })
   }
 
   const handleTypingStart = () => {
@@ -1096,9 +1096,9 @@ export default function AaronyxApp() {
 
             {/* Chat Conversation */}
             {chatView === 'conversation' && currentChat ? (
-              <div className="flex-1 flex flex-col">
+              <div className="flex-1 flex flex-col min-h-0">
                 {/* Chat Header */}
-                <div className="p-4 border-b flex items-center gap-3">
+                <div className="p-4 border-b flex items-center gap-3 shrink-0">
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1154,7 +1154,8 @@ export default function AaronyxApp() {
                 </div>
 
                 {/* Messages */}
-                <ScrollArea className="flex-1 p-4" ref={chatContainerRef}>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <ScrollArea className="h-full p-4" ref={chatContainerRef}>
                   <div className="space-y-4">
                     {messages.map((msg) => {
                       const isOwn = msg.senderId === user?.id
@@ -1196,9 +1197,10 @@ export default function AaronyxApp() {
                     })}
                   </div>
                 </ScrollArea>
+                </div>
 
                 {/* Message Input */}
-                <div className="p-4 border-t">
+                <div className="p-4 border-t shrink-0">
                   <div className="flex items-center gap-2">
                     <Button variant="ghost" size="icon">
                       <Paperclip className="h-5 w-5" />
