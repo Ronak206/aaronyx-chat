@@ -68,8 +68,9 @@ export default function AaronyxApp() {
   const [chatView, setChatView] = useState<ChatView>('list')
   const [messageInput, setMessageInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<User[]>([])
-  const [isSearching, setIsSearching] = useState(false)
+  const [allUsers, setAllUsers] = useState<User[]>([])
+  const [filteredUsers, setFilteredUsers] = useState<User[]>([])
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false)
   const [isSocketConnected, setIsSocketConnected] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [isTyping, setIsTyping] = useState(false)
@@ -308,23 +309,36 @@ export default function AaronyxApp() {
     }
   }
 
-  const searchUsers = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([])
-      return
-    }
-    setIsSearching(true)
+  // Load all users when new chat dialog opens
+  const loadAllUsers = async () => {
+    setIsLoadingUsers(true)
     try {
-      const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`)
+      const res = await fetch('/api/users')
       if (res.ok) {
         const data = await res.json()
-        setSearchResults(data.users)
+        setAllUsers(data.users)
+        setFilteredUsers(data.users)
       }
     } catch (error) {
-      console.error('Failed to search users:', error)
+      console.error('Failed to load users:', error)
     } finally {
-      setIsSearching(false)
+      setIsLoadingUsers(false)
     }
+  }
+
+  // Filter users locally as user types
+  const filterUsers = (query: string) => {
+    setSearchQuery(query)
+    if (!query.trim()) {
+      setFilteredUsers(allUsers)
+      return
+    }
+    const lowerQuery = query.toLowerCase()
+    const filtered = allUsers.filter(u => 
+      u.username.toLowerCase().includes(lowerQuery) ||
+      (u.displayName && u.displayName.toLowerCase().includes(lowerQuery))
+    )
+    setFilteredUsers(filtered)
   }
 
   // Auth handlers
@@ -837,7 +851,13 @@ export default function AaronyxApp() {
             <div className={`border-r flex flex-col ${chatView === 'conversation' ? 'hidden md:flex w-80' : 'w-full md:w-80'}`}>
               <div className="p-4 border-b flex items-center justify-between">
                 <h2 className="font-semibold text-lg">Messages</h2>
-                <Dialog open={showNewChatDialog} onOpenChange={setShowNewChatDialog}>
+                <Dialog open={showNewChatDialog} onOpenChange={(open) => {
+                  setShowNewChatDialog(open)
+                  if (open) {
+                    loadAllUsers()
+                    setSearchQuery('')
+                  }
+                }}>
                   <DialogTrigger asChild>
                     <Button size="icon" variant="ghost">
                       <Plus className="h-5 w-5" />
@@ -846,7 +866,7 @@ export default function AaronyxApp() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>New Chat</DialogTitle>
-                      <DialogDescription>Search for a user to start a conversation</DialogDescription>
+                      <DialogDescription>Select a user to start a conversation</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
                       <div className="relative">
@@ -854,18 +874,18 @@ export default function AaronyxApp() {
                         <Input
                           placeholder="Search users..."
                           value={searchQuery}
-                          onChange={(e) => { setSearchQuery(e.target.value); searchUsers(e.target.value) }}
+                          onChange={(e) => filterUsers(e.target.value)}
                           className="pl-9"
                         />
                       </div>
                       <ScrollArea className="h-64">
-                        {isSearching ? (
+                        {isLoadingUsers ? (
                           <div className="flex items-center justify-center h-full">
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                           </div>
-                        ) : searchResults.length > 0 ? (
+                        ) : filteredUsers.length > 0 ? (
                           <div className="space-y-2">
-                            {searchResults.map((u) => (
+                            {filteredUsers.map((u) => (
                               <Button
                                 key={u.id}
                                 variant="ghost"
@@ -876,8 +896,11 @@ export default function AaronyxApp() {
                                   <AvatarImage src={u.avatar || ''} />
                                   <AvatarFallback>{u.username?.slice(0, 2).toUpperCase()}</AvatarFallback>
                                 </Avatar>
-                                <div className="text-left">
-                                  <p className="font-medium">{u.displayName || u.username}</p>
+                                <div className="flex-1 text-left">
+                                  <div className="flex items-center justify-between">
+                                    <p className="font-medium">{u.displayName || u.username}</p>
+                                    <span className={`h-2 w-2 rounded-full ${u.isOnline ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+                                  </div>
                                   <p className="text-xs text-muted-foreground">@{u.username}</p>
                                 </div>
                               </Button>
@@ -885,7 +908,9 @@ export default function AaronyxApp() {
                           </div>
                         ) : searchQuery ? (
                           <p className="text-center text-muted-foreground py-8">No users found</p>
-                        ) : null}
+                        ) : (
+                          <p className="text-center text-muted-foreground py-8">No users available</p>
+                        )}
                       </ScrollArea>
                     </div>
                   </DialogContent>

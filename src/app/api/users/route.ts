@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 
-// Search users by username
+// GET /api/users - Get all users or search by username
 export async function GET(request: NextRequest) {
   try {
     const currentUser = await getCurrentUser();
@@ -15,20 +15,21 @@ export async function GET(request: NextRequest) {
     }
     
     const { searchParams } = new URL(request.url);
-    const query = searchParams.get('q');
+    const query = searchParams.get('q')?.trim().toLowerCase();
     
-    if (!query || query.length < 1) {
-      return NextResponse.json({ users: [] });
-    }
-    
+    // If query provided, filter by username
+    // Otherwise return all users except current user
     const users = await db.user.findMany({
       where: {
-        username: {
-          contains: query.toLowerCase(),
-        },
         id: {
           not: currentUser.id,
         },
+        ...(query ? {
+          OR: [
+            { username: { contains: query } },
+            { displayName: { contains: query } },
+          ]
+        } : {}),
       },
       select: {
         id: true,
@@ -38,12 +39,15 @@ export async function GET(request: NextRequest) {
         isOnline: true,
         lastSeen: true,
       },
-      take: 20,
+      take: 50,
+      orderBy: {
+        isOnline: 'desc', // Online users first
+      },
     });
     
     return NextResponse.json({ users });
   } catch (error) {
-    console.error('Search users error:', error);
+    console.error('Get users error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
